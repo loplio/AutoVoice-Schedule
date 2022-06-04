@@ -1,5 +1,7 @@
+import tkinter
 from tkinter import *
 from tkinter.ttk import *
+from tkinter import scrolledtext
 from PIL import ImageTk, Image
 import requests
 import json
@@ -25,31 +27,72 @@ def ShowCalendar(info):
 
 
 class TkLoop:
+    setDate = {'year': dt.datetime.now().year, 'month': dt.datetime.now().month, 'day': dt.datetime.now().day}
+
     def __init__(self):
         self.VoiceSupport = AutoVoice()
+        self.content = None
 
         self.root = Tk()
         self.root.title("Image Collect")
         self.root.geometry("420x340+1000+100")
         self.root.resizable(False, False)
 
+        self.date_var = tkinter.StringVar()
+        self.date_var.set(f'{TkLoop.setDate["year"]}년 {TkLoop.setDate["month"]}월 {TkLoop.setDate["day"]}일')
+
         self.frame = Frame(self.root)
         self.frame.pack()
-        self.Imageframe = Frame(self.root)
-        self.Imageframe.pack()
-        self.NowImage = Image.new('RGBA', (200, 200), 'white')
-        self.tk_image = ImageTk.PhotoImage(self.NowImage)
-        self.label = Label(self.root, image=self.tk_image)
-        self.label.pack()
+        # self.Imageframe = Frame(self.root)
+        # self.Imageframe.pack()
+        self.NowImage = Image.open('image1.jpg')
+        self.tk_image = ImageTk.PhotoImage(self.NowImage.resize((420, 200)))
+        imglabel = Label(self.root, image=self.tk_image)
+        imglabel.pack()
 
+        blanklabel = Label(self.frame, text=' 녹음', width=5)
+        blanklabel.grid(column=2, row=0)
+        datelabel = Label(self.frame, textvariable=self.date_var)
+        datelabel.grid(column=0, row=1, columnspan=5)
+        text1 = scrolledtext.ScrolledText(self.frame, width=50, height=10, font=("Consolas", 10))
+        text1.grid(column=0, row=2, columnspan=5)
         button1 = Button(self.frame, text='달력', command=lambda: ShowCalendar(self.VoiceSupport.RecVoice))
-        button1.pack()
-        button2 = Button(self.frame, text='음성인식', command=self.VoiceSupport.VoiceRecognition)
-        button2.pack()
+        button1.grid(column=0, row=0)
+        button2 = Button(self.frame, text='음성인식', command=lambda: self.updateContent(text1))
+        button2.grid(column=1, row=0)
+        button3 = Button(self.frame, text='저장', width=10, command=lambda: [MyApp.AppendInfo(self.VoiceSupport.RecVoice),
+                                                                           self.insertStateContent(text1, 'Save Success.')])
+        button3.grid(column=3, row=0)
+        button4 = Button(self.frame, text='삭제', width=10, command=lambda: [self.VoiceSupport.RemoveRecVoice(),
+                                                                           self.insertStateContent(text1, 'Delete Success.')])
+        button4.grid(column=4, row=0)
 
         self.root.bind('<Escape>', self.stop)
         self.root.bind('q', self.stop)
         self.root.mainloop()
+
+    def updateContent(self, text1):
+        self.content = self.VoiceSupport.VoiceRecognition()
+
+        if self.content:
+            text1.insert(END, 'Voice: ' + self.content)
+            if self.VoiceSupport.RecVoice:
+                text1.insert(END, '\n' + 'Content: ' + self.VoiceSupport.RecVoice['Content'] + '\n')
+
+        if self.VoiceSupport.RecVoice:
+            TkLoop.setDate["year"] = self.VoiceSupport.RecVoice["year"]
+            TkLoop.setDate["month"] = self.VoiceSupport.RecVoice["month"]
+            TkLoop.setDate["day"] = self.VoiceSupport.RecVoice["day"]
+            self.date_var.set(f'{TkLoop.setDate["year"]}년 {TkLoop.setDate["month"]}월 {TkLoop.setDate["day"]}일')
+
+    def insertStateContent(self, text1, stateInfo):
+        if 'Save Success.' in stateInfo:
+            if self.VoiceSupport.RecVoice:
+                text1.insert(END, f'{stateInfo}\n')
+            else:
+                text1.insert(END, f'There is nothing to save\n')
+        elif 'Delete Success.' in stateInfo:
+            text1.insert(END, f'{stateInfo}\n')
 
     def stop(self, event=None):
         self.root.destroy()
@@ -68,18 +111,21 @@ class AutoVoice:
         res = requests.post(url, headers=header, data=audio.get_raw_data())
         result_json_string = res.text[res.text.index('{"type":"finalResult"'):res.text.rindex('}') + 1]
         result = json.loads(result_json_string)
-        self.RecVoice = result['value']
+        fullcontent = result['value']
 
         CalRegexInfo = re.compile(r'^(\d{0,4}년)? *(\d{1,2}월)? *(\d{1,2}일)?')
-        if self.RecVoice is not None:
-            if bool(CalRegexInfo.search(self.RecVoice).group()):
-                ymd = CalRegexInfo.search(self.RecVoice).group().split()
+        if fullcontent is not None:
+            if bool(CalRegexInfo.search(fullcontent).group()):
+                ymd = CalRegexInfo.search(fullcontent).group().split()
+                ContentCount = fullcontent.find('일')
             else:
                 ymd = []
-                day = dt.datetime.now().day
+                day = TkLoop.setDate['day']
                 print(f'day니? {day}')
-            year = dt.datetime.now().year
-            month = dt.datetime.now().month
+                ContentCount = -1
+
+            year = TkLoop.setDate['year']
+            month = TkLoop.setDate['month']
             for n in ymd:
                 if '년' in n:
                     year = int(re.compile(r'\d+').search(n).group())
@@ -87,14 +133,23 @@ class AutoVoice:
                     month = int(re.compile(r'\d+').search(n).group())
                 elif '일' in n:
                     day = int(re.compile(r'\d+').search(n).group())
+
+            content = fullcontent[ContentCount + 1:]
+            print(f'ContentCount는 {ContentCount}에 있다')
+            print(content)
+            time = dt.datetime.now().strftime('%Y/%m/%d %H:%M:%S')
         try:
             dt.date(year, month, day)
+            self.RecVoice = {'year': year, 'month': month, 'day': day, 'time': time, 'Content': content}
         except Exception as e:
             print('날짜 설정 오류!', e)
             self.RecVoice = None
+        return fullcontent
         print(result)
         print(result['value'])
 
+    def RemoveRecVoice(self):
+        self.RecVoice = None
 
 class MyApp(QWidget):
     with open('Calendar_File.json', 'r', encoding='utf-8') as f:
@@ -104,48 +159,13 @@ class MyApp(QWidget):
         super().__init__()
         self.BasicInfo = None
         self.DateInfo = None
-        self.parsingInfo(info)
         self.initUI()
 
     @staticmethod
-    def parsingInfo(info):
-        CalRegexInfo = re.compile(r'^(\d{0,4}년)? *(\d{1,2}월)? *(\d{1,2}일)?')
-        if info is not None:
-            bufferInfo = {}
-            if bool(CalRegexInfo.search(info).group()):
-                ymd = CalRegexInfo.search(info).group().split()
-            else:
-                ymd = []
-
-            for n in ymd:
-                if '년' in n:
-                    bufferInfo['년'] = int(re.compile(r'\d+').search(n).group())
-                elif '월' in n:
-                    bufferInfo['월'] = int(re.compile(r'\d+').search(n).group())
-                elif '일' in n:
-                    bufferInfo['일'] = int(re.compile(r'\d+').search(n).group())
-
-            if '일' in bufferInfo:
-                ContentCount = info.find('일')
-            elif '월' in bufferInfo:
-                ContentCount = info.find('월')
-            elif '년' in bufferInfo:
-                ContentCount = info.find('년')
-            else:
-                ContentCount = -1
-
-            if '일' not in bufferInfo:
-                bufferInfo['일'] = dt.datetime.now().day
-            if '월' not in bufferInfo:
-                bufferInfo['월'] = dt.datetime.now().month
-            if '년' not in bufferInfo:
-                bufferInfo['년'] = dt.datetime.now().year
-
-            bufferInfo['Content'] = info[ContentCount+1:]
-            print(f'ContentCount는 {ContentCount}에 있다')
-            print(str(bufferInfo))
-            bufferInfo['time'] = dt.datetime.now().strftime('%Y/%m/%d %H:%M:%S')
-            MyApp.Qinfo.append(bufferInfo)
+    def AppendInfo(info):
+        print('AppendInfo: ' + str(info))
+        if info:
+            MyApp.Qinfo.append(info)
             with open('Calendar_File.json', 'w', encoding='utf-8') as f:
                 json.dump(MyApp.Qinfo, f, indent='\t')
 
@@ -161,9 +181,8 @@ class MyApp(QWidget):
         self.DateInfo = QLabel(self)
         self.DateInfo.setText(str('비어있네용~'))
         for info in MyApp.Qinfo:
-            if int(info['년']) == date.year() and int(info['월']) == date.month() and int(info['일']) == date.day():
+            if info['year'] == date.year() and info['month'] == date.month() and info['day'] == date.day():
                 self.DateInfo.setText(str(info))
-
         self.DateInfo.setAlignment(Qt.AlignCenter)
         font1 = self.DateInfo.font()
         font1.setPointSize(20)
@@ -185,10 +204,11 @@ class MyApp(QWidget):
         self.BasicInfo.setText(date.toString())
         self.DateInfo.setText('비어있네용~')
         for info in MyApp.Qinfo:
-            if info['년'] == date.year() and info['월'] == date.month() and info['일'] == date.day():
+            if info['year'] == date.year() and info['month'] == date.month() and info['day'] == date.day():
                 ContentList.append(info['Content'])
         if ContentList:
             self.DateInfo.setText('\n'.join(ContentList))
+
 
 if __name__ == '__main__':
     Program_Loop = TkLoop()
