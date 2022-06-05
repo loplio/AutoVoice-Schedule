@@ -19,6 +19,7 @@ header = {
     "Authorization": "KakaoAK " + f"{REST_API_KEY}"
 }
 
+DayOfTheWeek = ['월', '화', '수', '목', '금', '토', '일']
 
 def ShowCalendar(info):
     app = QApplication(sys.argv)
@@ -28,6 +29,7 @@ def ShowCalendar(info):
 
 class TkLoop:
     setDate = {'year': dt.datetime.now().year, 'month': dt.datetime.now().month, 'day': dt.datetime.now().day}
+    message = None
 
     def __init__(self):
         self.VoiceSupport = AutoVoice()
@@ -61,10 +63,12 @@ class TkLoop:
         button2 = Button(self.frame, text='음성인식', command=lambda: self.updateContent(text1))
         button2.grid(column=1, row=0)
         button3 = Button(self.frame, text='저장', width=10, command=lambda: [MyApp.AppendInfo(self.VoiceSupport.RecVoice),
-                                                                           self.insertStateContent(text1, 'Save Success.')])
+                                                                           self.insertStateContent(text1,
+                                                                                                   'Save Success.')])
         button3.grid(column=3, row=0)
-        button4 = Button(self.frame, text='삭제', width=10, command=lambda: [self.VoiceSupport.RemoveRecVoice(),
-                                                                           self.insertStateContent(text1, 'Delete Success.')])
+        button4 = Button(self.frame, text='삭제', width=10,
+                         command=lambda: [self.insertStateContent(text1, 'Delete Success.'),
+                                          self.VoiceSupport.RemoveRecVoice()])
         button4.grid(column=4, row=0)
 
         self.root.bind('<Escape>', self.stop)
@@ -72,18 +76,26 @@ class TkLoop:
         self.root.mainloop()
 
     def updateContent(self, text1):
+        TkLoop.message = None
         self.content = self.VoiceSupport.VoiceRecognition()
+        if TkLoop.message:
+            text1.insert(END, f'Err: {TkLoop.message}' + '\n')
+        else:
+            if self.content:
+                text1.insert(END, 'Voice: ' + self.content + '\n')
+                if self.VoiceSupport.RecVoice:
+                    if self.VoiceSupport.RecVoice['Content']:
+                        text1.insert(END, 'Content: ' + self.VoiceSupport.RecVoice['Content'] + '\n')
+                    else:
+                        text1.insert(END, 'The content is empty.' + '\n')
+                else:
+                    text1.insert(END, 'Date setting error' + '\n')
 
-        if self.content:
-            text1.insert(END, 'Voice: ' + self.content)
             if self.VoiceSupport.RecVoice:
-                text1.insert(END, '\n' + 'Content: ' + self.VoiceSupport.RecVoice['Content'] + '\n')
-
-        if self.VoiceSupport.RecVoice:
-            TkLoop.setDate["year"] = self.VoiceSupport.RecVoice["year"]
-            TkLoop.setDate["month"] = self.VoiceSupport.RecVoice["month"]
-            TkLoop.setDate["day"] = self.VoiceSupport.RecVoice["day"]
-            self.date_var.set(f'{TkLoop.setDate["year"]}년 {TkLoop.setDate["month"]}월 {TkLoop.setDate["day"]}일')
+                TkLoop.setDate["year"] = self.VoiceSupport.RecVoice["year"]
+                TkLoop.setDate["month"] = self.VoiceSupport.RecVoice["month"]
+                TkLoop.setDate["day"] = self.VoiceSupport.RecVoice["day"]
+                self.date_var.set(f'{TkLoop.setDate["year"]}년 {TkLoop.setDate["month"]}월 {TkLoop.setDate["day"]}일')
 
     def insertStateContent(self, text1, stateInfo):
         if 'Save Success.' in stateInfo:
@@ -92,52 +104,76 @@ class TkLoop:
             else:
                 text1.insert(END, f'There is nothing to save\n')
         elif 'Delete Success.' in stateInfo:
-            text1.insert(END, f'{stateInfo}\n')
+            if self.VoiceSupport.RecVoice:
+                text1.insert(END, f'{stateInfo}\n')
+            else:
+                text1.insert(END, f'There is nothing to delete\n')
 
     def stop(self, event=None):
         self.root.destroy()
 
 
 class AutoVoice:
+
     def __init__(self):
         self.RecVoice = None
 
     def VoiceRecognition(self):
-        with sr.Microphone(sample_rate=16000) as source:
-            print("Say something!")
-            r = sr.Recognizer()
-            audio = r.listen(source)
+        try:
+            with sr.Microphone(sample_rate=16000) as source:
+                print("Say something!")
+                r = sr.Recognizer()
+                audio = r.listen(source, timeout=3)
 
-        res = requests.post(url, headers=header, data=audio.get_raw_data())
-        result_json_string = res.text[res.text.index('{"type":"finalResult"'):res.text.rindex('}') + 1]
-        result = json.loads(result_json_string)
+            res = requests.post(url, headers=header, data=audio.get_raw_data())
+            result_json_string = res.text[res.text.index('{"type":"finalResult"'):res.text.rindex('}') + 1]
+            result = json.loads(result_json_string)
+
+        except Exception as err:
+            TkLoop.message = err
+            return
+
         fullcontent = result['value']
 
-        CalRegexInfo = re.compile(r'^(\d{0,4}년)? *(\d{1,2}월)? *(\d{1,2}일)?')
+        CalRegexInfo = re.compile(r'(^(\d{0,4}년\b)? *(\d{1,2}월\b)? *(\d{1,2}일\b)?)?'
+                                  rf'(^(이번 ?주 {DayOfTheWeek}요일\b)|^(다음 ?주 {DayOfTheWeek}요일)\b)?')
         if fullcontent is not None:
-            if bool(CalRegexInfo.search(fullcontent).group()):
-                ymd = CalRegexInfo.search(fullcontent).group().split()
-                ContentCount = fullcontent.find('일')
+            date_info = CalRegexInfo.search(fullcontent).group()
+            if re.compile(r'\d').search(date_info) or not date_info:
+                if bool(date_info):
+                    ymd = date_info.split()
+                    ContentCount = fullcontent.find('일')
+                else:
+                    ymd = []
+                    day = TkLoop.setDate['day']
+                    ContentCount = -1
+
+                year = TkLoop.setDate['year']
+                month = TkLoop.setDate['month']
+                for n in ymd:
+                    if '년' in n:
+                        year = int(re.compile(r'\d+').search(n).group())
+                    elif '월' in n:
+                        month = int(re.compile(r'\d+').search(n).group())
+                    elif '일' in n:
+                        day = int(re.compile(r'\d+').search(n).group())
             else:
-                ymd = []
-                day = TkLoop.setDate['day']
-                print(f'day니? {day}')
-                ContentCount = -1
+                str_day = date_info[date_info.find('요') - 1]
+                day_delta = DayOfTheWeek.index(str_day) - dt.datetime.today().weekday()
+                
+                if '이번' in date_info:
+                    day_info = dt.datetime.today() + dt.timedelta(days=day_delta)
+                elif '다음' in date_info:
+                    day_info = dt.datetime.today() + dt.timedelta(days=day_delta + 7)
 
-            year = TkLoop.setDate['year']
-            month = TkLoop.setDate['month']
-            for n in ymd:
-                if '년' in n:
-                    year = int(re.compile(r'\d+').search(n).group())
-                elif '월' in n:
-                    month = int(re.compile(r'\d+').search(n).group())
-                elif '일' in n:
-                    day = int(re.compile(r'\d+').search(n).group())
+                year = day_info.year
+                month = day_info.month
+                day = day_info.day
+                ContentCount = fullcontent.find('요일') + 1
 
-            content = fullcontent[ContentCount + 1:]
-            print(f'ContentCount는 {ContentCount}에 있다')
-            print(content)
+            content = fullcontent[ContentCount + 1:].lstrip()
             time = dt.datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+
         try:
             dt.date(year, month, day)
             self.RecVoice = {'year': year, 'month': month, 'day': day, 'time': time, 'Content': content}
@@ -150,6 +186,7 @@ class AutoVoice:
 
     def RemoveRecVoice(self):
         self.RecVoice = None
+
 
 class MyApp(QWidget):
     with open('Calendar_File.json', 'r', encoding='utf-8') as f:
@@ -195,14 +232,14 @@ class MyApp(QWidget):
         #
         self.setLayout(vbox)
         #
-        self.setWindowTitle('QCalendarWidget')
+        self.setWindowTitle('Calendar')
         self.setGeometry(300, 300, 400, 300)
         self.show()
 
     def showDate(self, date):
         ContentList = []
         self.BasicInfo.setText(date.toString())
-        self.DateInfo.setText('비어있네용~')
+        self.DateInfo.setText('비어있네요~')
         for info in MyApp.Qinfo:
             if info['year'] == date.year() and info['month'] == date.month() and info['day'] == date.day():
                 ContentList.append(info['Content'])
@@ -216,7 +253,7 @@ if __name__ == '__main__':
 # 메인 윈도우 기능
 # 1. 녹화 내용을 보여 주는 텍스트
 # 2. 녹화 내용 취소 기능
-# 3. 타임 라인(2주 전후?)
+# 3. 타임 라인(2주 전후?) - 다음주 일정 알려줘, 이번주 일정 알려줘, 이번달 일정 알려줘, (특정 일자) 일정 알려줘
 # 4. 스케줄 읽어 주는 버튼(음성 인식 후 해당 날짜 스케줄을 출력 또는 읽어줌)
 
 # 캘린더 윈도우 기능
